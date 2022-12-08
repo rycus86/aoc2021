@@ -74,6 +74,21 @@ class Grid(object):
     def count(self, item):
         return sum(row.count(item) for row in self.rows)
 
+    def locate(self, item):
+        for row, items in enumerate(self.rows):
+            if item in items:
+                return items.index(item), row
+
+    def locate_all(self, item):
+        for row, items in enumerate(self.rows):
+            if item in items:
+                yield items.index(item), row
+
+    def fill(self, item):
+        for idx in range(len(self.rows)):
+            self.rows[idx] = [item] * self.width
+        return self
+
     def clone(self):
         return Grid(list(list(row) for row in self.rows))
 
