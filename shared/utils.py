@@ -1,5 +1,8 @@
 import os
+import math
 import time
+from collections import defaultdict
+from heapq import heappush, heappop
 from typing import List, Dict, Set, Tuple, Iterable, Optional, Any
 
 
@@ -34,10 +37,25 @@ class Grid(object):
             changed = row[0:x] + [value] + row[x + 1:]
         self.rows[y] = changed
 
-    def rotate_left(self):
-        rotated_rows = list(reversed(
-            [self.get_column(x) for x in range(self.width)]
-        ))
+    def set_inplace(self, x: int, y: int, value: Any):
+        self.rows[y][x] = value
+
+    def rotate_left(self, joining=None):
+        if joining is not None:
+            rotated_rows = list(reversed(
+                [joining.join(self.get_column(x)) for x in range(self.width)]
+            ))
+        else:
+            rotated_rows = list(reversed(
+                [self.get_column(x) for x in range(self.width)]
+            ))
+        return Grid(rotated_rows)
+
+    def rotate_right(self, joining=None):
+        if joining is not None:
+            rotated_rows = [joining.join(reversed(self.get_column(x))) for x in range(self.width)]
+        else:
+            rotated_rows = [list(reversed(self.get_column(x))) for x in range(self.width)]
         return Grid(rotated_rows)
 
     def flip_y(self):
@@ -81,16 +99,42 @@ class Grid(object):
 
     def locate_all(self, item):
         for row, items in enumerate(self.rows):
-            if item in items:
-                yield items.index(item), row
+            start = items.find(item)
+            while start > -1:
+                yield start, row
+                start = items.find(item, start+1)
 
-    def fill(self, item):
+    def flood_fill(self, start_x, start_y, source, target, include_diagonals=False):
+        num_filled = 0
+
+        to_fill = [(start_x, start_y)]
+        while to_fill:
+            x, y = to_fill.pop()
+            self.set_inplace(x, y, target)
+            num_filled += 1
+
+            for nx, ny in self.nearby_cells(x, y, include_diagonals):
+                if self.get(nx, ny) == source:
+                    to_fill.append((nx, ny))
+
+        return num_filled
+
+    def fill(self, item, joining=None):
         for idx in range(len(self.rows)):
-            self.rows[idx] = [item] * self.width
+            if joining:
+                self.rows[idx] = joining.join([item] * self.width)
+            else:
+                self.rows[idx] = [item] * self.width
         return self
 
-    def clone(self):
-        return Grid(list(list(row) for row in self.rows))
+    def clone(self, joining=None):
+        if joining is not None:
+            return Grid(list(joining.join(row) for row in self.rows))
+        else:
+            return Grid(list(list(row) for row in self.rows))
+
+    def __hash__(self):
+        return hash(tuple(tuple(row) for row in self.rows))
 
     def to_string(self):
         return '\n'.join(''.join(map(str, row)) for row in self.rows)
@@ -101,11 +145,79 @@ class Grid(object):
 
     @classmethod
     def parse(cls, rows: List[Any]):
-        return Grid(rows)
+        return cls(rows)
 
     @classmethod
-    def empty(cls, width, height):
-        return Grid([[0] * width] * height)
+    def empty(cls, width, height, default=0):
+        one_row = [default] * width
+
+        rows = list()
+        for _ in range(height):
+            rows.append(one_row[:])
+        return cls(rows)
+
+    def dijkstra(self, algorithm: type = None, start_x=0, start_y=0, infinity=10**100, **kwargs):
+        if algorithm is None:
+            algorithm = Grid.Dijkstra
+
+        d = algorithm(self, infinity, **kwargs)
+        d.process(start_x, start_y)
+        return d
+
+    class Dijkstra:
+
+        def __init__(self, grid: 'Grid', infinity=10**100):
+            self.grid = grid
+            self.infinity = infinity
+
+            self.distances = dict()
+            self.previous = dict()
+
+        def to_key(self, x, y):
+            return x, y
+
+        def neighbours(self, key):
+            x, y, *_ = key
+            for (nx, ny), value in self.grid.nearby_cells(x, y).items():
+                yield (nx, ny), value
+
+        def process(self, start_x=0, start_y=0):
+            queue = list()
+
+            self.distances.update({
+                self.to_key(x, y): self.infinity
+                for x in range(self.grid.width)
+                for y in range(self.grid.height)
+            })
+            self.distances[self.to_key(start_x, start_y)] = 0
+
+            start_key = self.to_key(start_x, start_y)
+            heappush(queue, (self.distances[start_key], start_key))
+
+            while queue:
+                cost, key = heappop(queue)
+                x, y, *_ = key
+
+                for nkey, nv in self.neighbours(key):
+                    total = cost + nv
+                    nx, ny, *_ = nkey
+
+                    if total < self.distances.get(nkey, self.infinity):
+                        self.distances[nkey] = total
+                        self.previous[(nx, ny)] = (x, y)
+
+                        heappush(queue, (total, nkey))
+
+        def min_distance(self, target_x=None, target_y=None):
+            if target_x is None and target_y is None:
+                target_x = self.grid.width - 1
+                target_y = self.grid.height - 1
+
+            result = self.infinity
+            for (x, y, *_), value in self.distances.items():
+                if (x, y) == (target_x, target_y):
+                    result = min(result, value)
+            return result
 
 
 class Cube(object):
@@ -217,6 +329,62 @@ class CubeN(object):
 
     def max(self, dimension_index):
         return self.maximums[dimension_index]
+
+
+class Interval:
+    start: int
+    end: int
+    data: Any
+
+    def __init__(self, start: int, end_exclusive: int, data: Any = None):
+        self.start = start
+        self.end = end_exclusive
+        self.data = data
+
+    def __len__(self):
+        return self.end - self.start
+
+    def __lt__(self, other):
+        return self.start < other.start
+
+    def __repr__(self):
+        plus_data = f',{self.data}' if self.data else ''
+        return f'I[{self.start}-{self.end})={len(self)}{plus_data})'
+
+    def contains(self, position):
+        return self.start <= position < self.end
+
+    def split(self, other: 'Interval') -> List['Interval']:
+        parts = list()
+
+        if other.start <= self.start < self.end <= other.end:
+            # self is contained within other
+            parts.append(Interval(self.start, self.end, other.data))
+
+        elif self.start <= other.start < other.end <= self.end:
+            # other is contained within self
+            if self.start < other.start:
+                parts.append(Interval(self.start, other.start, self.data))
+            parts.append(Interval(other.start, other.end, other.data))
+            if other.end < self.end:
+                parts.append(Interval(other.end, self.end, self.data))
+
+        elif self.start <= other.start < self.end:
+            # self is left of other, but other finishes later
+            if self.start < other.start:
+                parts.append(Interval(self.start, other.start, self.data))
+            parts.append(Interval(other.start, min(self.end, other.end), other.data))
+
+        elif self.start < other.end <= self.end:
+            # self is right of other, but other starts first
+            parts.append(Interval(self.start, other.end, other.data))
+            if other.end < self.end:
+                parts.append(Interval(other.end, self.end, self.data))
+
+        else:
+            parts.append(self)
+
+        return parts
 
 
 class Solution(object):
