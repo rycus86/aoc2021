@@ -38,7 +38,10 @@ class Grid(object):
         self.rows[y] = changed
 
     def set_inplace(self, x: int, y: int, value: Any):
-        self.rows[y][x] = value
+        if isinstance(self.rows[y], str):
+            self.set(x, y, value)
+        else:
+            self.rows[y][x] = value
 
     def rotate_left(self, joining=None):
         if joining is not None:
@@ -98,7 +101,11 @@ class Grid(object):
                 return items.index(item), row
 
     def locate_all(self, item):
-        for row, items in enumerate(self.rows):
+        rows = self.rows
+        if isinstance(rows[0], list):
+            rows = [''.join(row) for row in rows]
+
+        for row, items in enumerate(rows):
             start = items.find(item)
             while start > -1:
                 yield start, row
@@ -164,6 +171,24 @@ class Grid(object):
         d.process(start_x, start_y)
         return d
 
+    def find_shortest_path(self, start_x, start_y, target_x, target_y, allowed_neighbors='.', limit=math.inf):
+        visited = set()
+        queue = [(start_x, start_y, 0)]
+
+        while queue:
+            x, y, d = queue.pop(0)
+            if (x, y) == (target_x, target_y):
+                return d
+
+            if d >= limit:
+                continue
+
+            visited.add((x, y))
+
+            for (nx, ny), item in self.nearby_cells(x, y).items():
+                if item in allowed_neighbors and (nx, ny) not in visited:
+                    queue.append((nx, ny, d + 1))
+
     class Dijkstra:
 
         def __init__(self, grid: 'Grid', infinity=10**100):
@@ -218,6 +243,21 @@ class Grid(object):
                 if (x, y) == (target_x, target_y):
                     result = min(result, value)
             return result
+
+        def min_path(self, start_x=0, start_y=0, target_x=None, target_y=None):
+            if target_x is None and target_y is None:
+                target_x = self.grid.width - 1
+                target_y = self.grid.height - 1
+
+            path = [(target_x, target_y)]
+
+            x, y = target_x, target_y
+            while (x, y) != (start_x, start_y):
+                x, y = self.previous[(x, y)]
+                path.insert(0, (x, y))
+
+            return path
+
 
 
 class Cube(object):
